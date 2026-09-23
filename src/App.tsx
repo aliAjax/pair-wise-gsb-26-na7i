@@ -1,160 +1,162 @@
+import { useEffect, useState } from "react";
+import { StoreProvider, useStore } from "./state/store.js";
+import { pendingAdjustments } from "./domain/adjustments.js";
+import { SessionsPage } from "./ui/SessionsPage.js";
+import { SessionDetailPage } from "./ui/SessionDetailPage.js";
+import { AdjustmentsPage } from "./ui/AdjustmentsPage.js";
+import { NotificationsPage } from "./ui/NotificationsPage.js";
+import type { Role } from "./domain/types.js";
 import "./styles.css";
 
-const project = {
-  "id": "hxwl-12",
-  "port": 5112,
-  "title": "心理咨询个案记录",
-  "subtitle": "会谈时间线、风险等级与干预目标记录",
-  "stack": "React + Vite + TypeScript + CSS",
-  "theme": [
-    "#7c3aed",
-    "#0f766e",
-    "#f59e0b"
-  ],
-  "domain": "心理咨询",
-  "users": [
-    "咨询师",
-    "督导",
-    "机构管理员"
-  ],
-  "metrics": [
-    "活跃个案",
-    "高风险关注",
-    "本周会谈",
-    "目标推进"
-  ],
-  "filters": [
-    "焦虑",
-    "亲密关系",
-    "亲子",
-    "职业压力"
-  ],
-  "fields": [
-    "来访者代号",
-    "咨询主题",
-    "会谈日期",
-    "主要困扰",
-    "情绪状态",
-    "干预方法",
-    "下次目标"
-  ],
-  "records": [
-    [
-      "C-042",
-      "焦虑",
-      "中风险",
-      "睡眠改善，练习呼吸放松"
-    ],
-    [
-      "C-119",
-      "亲密关系",
-      "稳定",
-      "识别沟通中的回避模式"
-    ],
-    [
-      "C-203",
-      "职业压力",
-      "关注",
-      "设定下周边界练习"
-    ]
-  ]
-};
+type Route =
+  | { name: "sessions" }
+  | { name: "session"; id: string }
+  | { name: "adjustments" }
+  | { name: "notifications" };
 
-const statusColors = ["status-ok", "status-watch", "status-danger"];
+function parseHash(hash: string): Route {
+  const clean = hash.replace(/^#\/?/, "");
+  if (clean.startsWith("session/")) return { name: "session", id: clean.slice("session/".length) };
+  if (clean === "adjustments") return { name: "adjustments" };
+  if (clean === "notifications") return { name: "notifications" };
+  return { name: "sessions" };
+}
 
-function MetricCard({ label, value, index }: { label: string; value: string; index: number }) {
+function routeToHash(route: Route): string {
+  switch (route.name) {
+    case "session":
+      return `#/session/${route.id}`;
+    case "adjustments":
+      return "#/adjustments";
+    case "notifications":
+      return "#/notifications";
+    default:
+      return "#/sessions";
+  }
+}
+
+const roles: { value: Role; label: string }[] = [
+  { value: "client", label: "来访者" },
+  { value: "counselor", label: "顾问" },
+  { value: "supervisor", label: "督导" },
+];
+
+function Shell() {
+  const store = useStore();
+  const { state, role, setRole, error, setError, advanceClock, resetClock, resetData } = store;
+  const [route, setRoute] = useState<Route>(() => parseHash(window.location.hash));
+
+  useEffect(() => {
+    const onHash = () => setRoute(parseHash(window.location.hash));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const navigate = (next: Route) => {
+    window.location.hash = routeToHash(next);
+  };
+
+  const pendingCount = pendingAdjustments(state).length;
+  const unreadCount = state.notifications.filter((n) => !n.read).length;
+  const clockOffsetDays = state.clockOffsetMs / 86_400_000;
+
   return (
-    <article className="metric-card">
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <i className={statusColors[index % statusColors.length]} />
-    </article>
+    <div className="app">
+      <header className="app-header">
+        <div className="header-inner">
+          <div className="brand" onClick={() => navigate({ name: "sessions" })}>
+            <h1>团体小组排场次</h1>
+            <span>hxwl-12 · 心理咨询机构内部系统</span>
+          </div>
+          <nav className="main-nav">
+            <button
+              className={route.name === "sessions" || route.name === "session" ? "nav-active" : ""}
+              onClick={() => navigate({ name: "sessions" })}
+            >
+              场次
+            </button>
+            <button
+              className={route.name === "notifications" ? "nav-active" : ""}
+              onClick={() => navigate({ name: "notifications" })}
+            >
+              通知{unreadCount > 0 && <span className="badge">{unreadCount}</span>}
+            </button>
+            <button
+              className={route.name === "adjustments" ? "nav-active" : ""}
+              onClick={() => navigate({ name: "adjustments" })}
+            >
+              调整单{pendingCount > 0 && <span className="badge badge-warn">{pendingCount}</span>}
+            </button>
+          </nav>
+          <div className="header-side">
+            <label className="role-switch">
+              身份
+              <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
+                {roles.map((r) => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+      </header>
+
+      {error && (
+        <div className="error-banner">
+          <span>{error}</span>
+          <button onClick={() => setError(null)}>知道了</button>
+        </div>
+      )}
+
+      <main className="app-main">
+        {route.name === "sessions" && <SessionsPage onOpen={(id) => navigate({ name: "session", id })} />}
+        {route.name === "session" && (
+          <SessionDetailPage sessionId={route.id} onBack={() => navigate({ name: "sessions" })} />
+        )}
+        {route.name === "adjustments" && (
+          <AdjustmentsPage onOpenSession={(id) => navigate({ name: "session", id })} />
+        )}
+        {route.name === "notifications" && (
+          <NotificationsPage onOpenSession={(id) => navigate({ name: "session", id })} />
+        )}
+      </main>
+
+      <footer className="app-footer">
+        <div className="footer-inner">
+          <span>
+            模拟时钟偏移：<strong>{clockOffsetDays.toFixed(2)}</strong> 天（用于演示 24 小时确认期限）
+          </span>
+          <div className="row-actions">
+            <button className="small-btn" onClick={() => advanceClock(60 * 60_000)}>
+              快进 1 小时
+            </button>
+            <button className="small-btn" onClick={() => advanceClock(25 * 60 * 60_000)}>
+              快进 25 小时
+            </button>
+            <button className="small-btn" onClick={resetClock}>
+              恢复当前时间
+            </button>
+            <button
+              className="small-btn danger-btn"
+              onClick={() => {
+                if (window.confirm("确认清空本地数据并恢复演示数据？")) resetData();
+              }}
+            >
+              重置演示数据
+            </button>
+          </div>
+        </div>
+      </footer>
+    </div>
   );
 }
 
-function App() {
-  const values = project.metrics.map((metric: string, index: number) => {
-    const base = [84, 12, 31, 7][index % 4];
-    return String(base + index * 3);
-  });
-
+export default function App() {
   return (
-    <main className="app-shell">
-      <section className="hero">
-        <div>
-          <p className="eyebrow">{project.id} · port {project.port}</p>
-          <h1>{project.title}</h1>
-          <p className="subtitle">{project.subtitle}</p>
-        </div>
-        <div className="stack-card">
-          <span>技术栈</span>
-          <strong>{project.stack}</strong>
-        </div>
-      </section>
-
-      <section className="metrics-grid">
-        {project.metrics.map((metric: string, index: number) => (
-          <MetricCard key={metric} label={metric} value={values[index]} index={index} />
-        ))}
-      </section>
-
-      <section className="workspace">
-        <aside className="panel narrow">
-          <h2>角色</h2>
-          <div className="chips">
-            {project.users.map((user: string) => (
-              <span key={user}>{user}</span>
-            ))}
-          </div>
-          <h2>筛选</h2>
-          <div className="chips muted">
-            {project.filters.map((filter: string) => (
-              <button key={filter}>{filter}</button>
-            ))}
-          </div>
-        </aside>
-
-        <section className="panel">
-          <div className="section-heading">
-            <div>
-              <p>{project.domain}</p>
-              <h2>记录字段</h2>
-            </div>
-            <button className="primary-action">新增记录</button>
-          </div>
-          <div className="field-grid">
-            {project.fields.map((field: string) => (
-              <label key={field}>
-                <span>{field}</span>
-                <input placeholder={"填写" + field} />
-              </label>
-            ))}
-          </div>
-        </section>
-      </section>
-
-      <section className="records panel">
-        <div className="section-heading">
-          <div>
-            <p>示例数据</p>
-            <h2>近期记录</h2>
-          </div>
-          <button>导出摘要</button>
-        </div>
-        <div className="record-list">
-          {project.records.map((record: string[], index: number) => (
-            <article key={record.join("-")} className="record-card">
-              <div className="record-index">{String(index + 1).padStart(2, "0")}</div>
-              <div>
-                <h3>{record[0]}</h3>
-                <p>{record.slice(1).join(" · ")}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-    </main>
+    <StoreProvider>
+      <Shell />
+    </StoreProvider>
   );
 }
-
-export default App;
